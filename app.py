@@ -230,6 +230,11 @@ def direction_name(deg):
 # Sidebar
 # ---------------------------------------------------------------------------
 st.sidebar.title("🔥 Kebakaran TNBTS 2026")
+st.sidebar.subtitle("*App Developer:*")
+st.sidebar.markdown("*Dr. Adipandang Yudono*")
+st.sidebar.markdown("GIS Analytics Enthusiast")
+st.sidebar.markdown("-----------------------------------------------------------")
+
 st.sidebar.markdown(
     "Monitoring visual & analitik sederhana perkembangan kebakaran hutan "
     "dan lahan di kawasan Taman Nasional Bromo Tengger Semeru, "
