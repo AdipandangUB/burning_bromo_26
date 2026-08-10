@@ -1,0 +1,9 @@
+streamlit
+pandas
+numpy
+plotly
+Pillow
+streamlit-image-comparison
+folium
+streamlit-folium
+scikit-learn
