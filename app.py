@@ -230,8 +230,8 @@ def direction_name(deg):
 # Sidebar
 # ---------------------------------------------------------------------------
 st.sidebar.title("🔥 Kebakaran TNBTS 2026")
-st.sidebar.markdown("*App Developer:*")
-st.sidebar.markdown("*Dr. Adipandang Yudono*")
+st.sidebar.markdown("**App Developer:**")
+st.sidebar.markdown("**Dr. Adipandang Yudono**")
 st.sidebar.markdown("GIS Analytcis Enthusiast")
 st.sidebar.markdown("-------------------------------------------------------")
 
