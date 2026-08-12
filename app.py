@@ -3,6 +3,13 @@ WebGIS Interaktif — Monitoring Kebakaran TNBTS (Agustus 2026)
 Dibuat untuk analisis before-after citra Sentinel-2 L2A True Color
 serta analitik tren & proyeksi sederhana luas area terdampak.
 
+Sejak revisi Agustus 2026, halaman "Analitik & Prediksi Sebaran" dapat
+mengambil kecepatan & arah angin permukaan secara REAL-TIME dari Open-Meteo
+(model NOAA GFS/ECMWF) untuk lokasi kawah Bromo, sebagai data numerik yang
+setara dengan visualisasi di earth.nullschool.net (situs tsb. tidak
+menyediakan API publik untuk diambil terprogram). Data ini menjadi input
+langsung ke model Random Forest arah & luasan rambatan api.
+
 PENTING: Aplikasi ini BUKAN produk operasional resmi. Estimasi arah dan
 proyeksi luas bersifat indikatif, dibangun dari data luasan yang dilaporkan
 BPBD/TNBTS di media serta interpretasi visual citra Sentinel-2 true color.
@@ -11,6 +18,7 @@ hotspot NASA FIRMS/VIIRS.
 """
 
 import os
+import requests
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -224,6 +232,60 @@ def direction_name(deg):
     dirs = ["Utara", "Timur Laut", "Timur", "Tenggara",
             "Selatan", "Barat Daya", "Barat", "Barat Laut"]
     return dirs[int((deg + 22.5) // 45) % 8]
+
+
+# ---------------------------------------------------------------------------
+# Data angin real-time
+# ---------------------------------------------------------------------------
+# earth.nullschool.net (link yang diberikan pengguna) adalah globe visual
+# interaktif berbasis WebGL yang di-render di sisi klien dari data model NOAA
+# GFS; situs ini TIDAK menyediakan endpoint/API data publik yang bisa diambil
+# secara terprogram (scraping globe canvas semacam itu juga melanggar Terms
+# of Service-nya). Sebagai gantinya, aplikasi ini mengambil angka kecepatan &
+# arah angin permukaan (10 m) secara real-time dari Open-Meteo, yang bersumber
+# dari model cuaca global yang sama (NOAA GFS / ECMWF) -- yaitu data numerik
+# yang setara dengan apa yang divisualisasikan di earth.nullschool.net untuk
+# titik dan waktu yang sama. Pengguna tetap bisa membuka nullschool secara
+# manual untuk cross-check visual pola angin regional.
+NULLSCHOOL_URL = (
+    "https://earth.nullschool.net/#current/wind/surface/level/"
+    "orthographic=-247.36,-7.78,18315"
+)
+
+
+@st.cache_data(ttl=600, show_spinner="Mengambil data angin real-time dari Open-Meteo...")
+def fetch_wind_open_meteo(lat, lon):
+    """
+    Mengambil wind_speed_10m (m/s) dan wind_direction_10m (arah ASAL angin,
+    konvensi meteorologi: 0=Utara, 90=Timur) dari Open-Meteo untuk koordinat
+    (lat, lon). Cache 10 menit agar tidak membebani API di setiap rerun.
+    Return: dict {speed_ms, dir_from_deg, dir_to_deg, waktu_lokal} atau None.
+    """
+    try:
+        resp = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "current": "wind_speed_10m,wind_direction_10m",
+                "wind_speed_unit": "ms",
+                "timezone": "Asia/Jakarta",
+            },
+            timeout=8,
+        )
+        resp.raise_for_status()
+        cur = resp.json()["current"]
+        dir_from = float(cur["wind_direction_10m"]) % 360
+        return {
+            "speed_ms": float(cur["wind_speed_10m"]),
+            "dir_from_deg": dir_from,
+            # dir_to_deg = arah TUJUAN angin bertiup, dipakai sebagai
+            # wind_dir_deg pada model ML/footprint (0=Utara, 90=Timur).
+            "dir_to_deg": (dir_from + 180) % 360,
+            "waktu_lokal": cur.get("time", ""),
+        }
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -527,7 +589,57 @@ tetap dapat dipelajari model.
         )
         st.dataframe(template, use_container_width=True, hide_index=True)
 
-    st.markdown("### 3. Input kondisi angin untuk skenario prediksi")
+    st.markdown("### 3. Kondisi angin untuk skenario prediksi")
+
+    src_col, link_col = st.columns([3, 2])
+    wind_source = src_col.radio(
+        "Sumber data angin",
+        ["Otomatis (real-time, Open-Meteo)", "Manual"],
+        horizontal=True,
+        help=(
+            "'Otomatis' mengambil kecepatan & arah angin permukaan (10 m) "
+            "real-time dari Open-Meteo (model NOAA GFS/ECMWF) untuk lokasi "
+            "kawah Bromo -- data numerik setara dengan yang divisualisasikan "
+            "di earth.nullschool.net, karena situs tersebut tidak menyediakan "
+            "API/data publik untuk diambil terprogram."
+        ),
+    )
+    link_col.link_button(
+        "🌐 Buka earth.nullschool.net (cross-check visual)",
+        NULLSCHOOL_URL,
+        use_container_width=True,
+    )
+
+    auto = None
+    if wind_source.startswith("Otomatis"):
+        colf1, colf2 = st.columns([1, 4])
+        if colf1.button("🔄 Refresh data angin"):
+            fetch_wind_open_meteo.clear()
+        auto = fetch_wind_open_meteo(ANCHOR_LATLON[0], ANCHOR_LATLON[1])
+        if auto:
+            colf2.success(
+                f"Angin real-time di TNBTS (Open-Meteo, {auto['waktu_lokal']} WIB): "
+                f"**{auto['speed_ms']:.1f} m/s**, bertiup dari "
+                f"**{direction_name(auto['dir_from_deg'])} ({auto['dir_from_deg']:.0f}°)** "
+                f"menuju **{direction_name(auto['dir_to_deg'])} ({auto['dir_to_deg']:.0f}°)**."
+            )
+        else:
+            colf2.warning(
+                "Gagal mengambil data angin real-time (periksa koneksi internet "
+                "server / API Open-Meteo). Silakan pakai mode Manual di bawah."
+            )
+
+    st.caption(
+        "Catatan: `wind_dir_deg` pada model ini adalah **arah tujuan** "
+        "pergerakan angin (0°=Utara, 90°=Timur), sedangkan Open-Meteo/BMKG "
+        "melaporkan **arah asal** angin (konvensi meteorologi standar) -- "
+        "aplikasi ini otomatis mengonversinya (+180°)."
+    )
+
+    default_speed = auto["speed_ms"] if auto else 4.0
+    default_dir = auto["dir_to_deg"] if auto else 70.0
+    inputs_disabled = bool(auto) and wind_source.startswith("Otomatis")
+
     c1, c2, c3, c4 = st.columns(4)
     current_area = c1.number_input(
         "Luas saat ini (ha)", min_value=0.1,
@@ -535,11 +647,17 @@ tetap dapat dipelajari model.
     )
     wind_speed = c2.number_input(
         "Kecepatan angin (m/s)", min_value=0.0,
-        value=4.0, step=0.5
+        value=float(default_speed), step=0.5,
+        disabled=inputs_disabled,
+        help="Terisi otomatis dari Open-Meteo saat sumber = Otomatis. "
+             "Pilih 'Manual' untuk mengubah nilai ini.",
     )
     wind_dir = c3.number_input(
-        "Arah angin (°)", min_value=0.0, max_value=359.9,
-        value=70.0, step=5.0
+        "Arah angin - tujuan (°)", min_value=0.0, max_value=359.9,
+        value=float(default_dir), step=5.0,
+        disabled=inputs_disabled,
+        help="Terisi otomatis dari Open-Meteo (arah asal +180°) saat sumber = "
+             "Otomatis. Pilih 'Manual' untuk mengubah nilai ini.",
     )
     horizon = c4.number_input(
         "Horizon prediksi (hari)", min_value=1, max_value=7,
@@ -608,8 +726,11 @@ tetap dapat dipelajari model.
                 popup=(
                     f"<b>Prediksi ML</b><br>"
                     f"Luas: {pred_area:,.1f} ha<br>"
-                    f"Arah: {pred_dir:.0f}° ({direction_name(pred_dir)})<br>"
-                    f"Angin: {wind_speed:.1f} m/s dari {wind_dir:.0f}°"
+                    f"Arah rambatan: {pred_dir:.0f}° ({direction_name(pred_dir)})<br>"
+                    f"Angin: {wind_speed:.1f} m/s menuju {wind_dir:.0f}° "
+                    f"({direction_name(wind_dir)})<br>"
+                    f"Sumber angin: "
+                    f"{'Real-time (Open-Meteo)' if (auto and wind_source.startswith('Otomatis')) else 'Manual'}"
                 ),
                 color="red",
                 weight=3,
@@ -644,10 +765,17 @@ tetap dapat dipelajari model.
             wind_end_lat, wind_end_lon = destination_point(
                 center_lat, center_lon, extent_km * 0.65, wind_dir
             )
+            wind_src_label = (
+                "real-time Open-Meteo" if (auto and wind_source.startswith("Otomatis"))
+                else "input manual"
+            )
             folium.PolyLine(
                 [[center_lat, center_lon], [wind_end_lat, wind_end_lon]],
                 color="cyan", weight=3, dash_array="6",
-                tooltip=f"Arah angin input: {wind_dir:.0f}°"
+                tooltip=(
+                    f"Arah angin ({wind_src_label}), menuju {wind_dir:.0f}° "
+                    f"({direction_name(wind_dir)}), {wind_speed:.1f} m/s"
+                )
             ).add_to(m)
 
             folium.LayerControl().add_to(m)
@@ -661,12 +789,17 @@ tetap dapat dipelajari model.
             )
 
             st.markdown("### 5. Ringkasan skenario")
+            wind_src_txt = (
+                "data angin **real-time (Open-Meteo)**"
+                if (auto and wind_source.startswith("Otomatis"))
+                else "data angin **input manual**"
+            )
             st.write(
-                f"Untuk luas awal **{current_area:,.1f} ha**, angin "
-                f"**{wind_speed:.1f} m/s** dengan arah **{wind_dir:.0f}°**, "
-                f"model memproyeksikan luas sekitar **{pred_area:,.1f} ha** "
-                f"dalam **{int(horizon)} hari** dan arah rambatan "
-                f"**{pred_dir:.0f}° ({direction_name(pred_dir)})**."
+                f"Untuk luas awal **{current_area:,.1f} ha**, menggunakan {wind_src_txt} "
+                f"**{wind_speed:.1f} m/s** menuju arah **{wind_dir:.0f}° "
+                f"({direction_name(wind_dir)})**, model memproyeksikan luas sekitar "
+                f"**{pred_area:,.1f} ha** dalam **{int(horizon)} hari** dan arah "
+                f"rambatan **{pred_dir:.0f}° ({direction_name(pred_dir)})**."
             )
 
         except Exception as e:
@@ -693,6 +826,16 @@ Arah angin harus dibedakan secara konsisten antara **arah asal angin** dan
 **arah tujuan angin**. Pada aplikasi ini input `wind_dir_deg` diperlakukan
 sebagai **arah tujuan/pergerakan angin** (0° = Utara, 90° = Timur) agar
 mudah digunakan sebagai vektor penggerak footprint.
+
+**Integrasi angin real-time**: aplikasi ini mengambil `wind_speed_10m` dan
+`wind_direction_10m` real-time dari [Open-Meteo](https://open-meteo.com)
+(model NOAA GFS/ECMWF) untuk koordinat kawah Bromo, lalu mengonversi arah
+asal → arah tujuan (+180°) sebelum dimasukkan ke model. Ini dipilih karena
+earth.nullschool.net -- yang divisualisasikan sangat baik secara grafis --
+tidak menyediakan API/data publik untuk pengambilan otomatis; Open-Meteo
+memakai model sumber data yang sama sehingga nilainya setara secara numerik.
+Untuk pengembangan lanjut, data ini sebaiknya dilog secara berkala (mis.
+setiap jam) ke database time-series agar riwayat angin ikut menjadi bagian
+dataset training ML, bukan hanya snapshot saat prediksi dijalankan.
 """
     )
-
