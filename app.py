@@ -41,14 +41,15 @@ IMG_DIR = os.path.join(BASE_DIR, "images")
 IMAGES = {
     "2026-08-02": {"file": os.path.join(IMG_DIR, "aug02.jpg"), "label": "2 Agustus 2026 (Awal / baseline)"},
     "2026-08-07": {"file": os.path.join(IMG_DIR, "aug07.jpg"), "label": "7 Agustus 2026 (Pertengahan)"},
-    "2026-08-09": {"file": os.path.join(IMG_DIR, "aug09.jpg"), "label": "9 Agustus 2026 (Terkini)"},
+    "2026-08-09": {"file": os.path.join(IMG_DIR, "aug09.jpg"), "label": "9 Agustus 2026 (Update)"},
+    "2026-08-12": {"file": os.path.join(IMG_DIR, "aug12.jpg"), "label": "12 Agustus 2026 (Terkini)"},
 }
 
 _missing = [v["file"] for v in IMAGES.values() if not os.path.isfile(v["file"])]
 if _missing:
     st.error(
         "File citra tidak ditemukan di server. Pastikan folder images/ "
-        "(berisi aug02.jpg, aug07.jpg, aug09.jpg) sudah di-commit ke repository "
+        "(berisi aug02.jpg, aug07.jpg, aug09.jpg, aug12.jpg) sudah di-commit ke repository "
         "GitHub, sejajar dengan app.py -- bukan hanya di dalam file zip.\n\n"
         "File yang hilang: " + ", ".join(_missing) +
         f"\n\nIsi folder {IMG_DIR} saat ini: "
@@ -66,6 +67,7 @@ AREA_DATA = pd.DataFrame([
     {"tanggal": "2026-08-06", "luas_ha": 70,    "catatan": "Dilaporkan Poskota per Kamis 6/8", "pasti": True},
     {"tanggal": "2026-08-07", "luas_ha": 176,   "catatan": "Dilaporkan Jumat malam 7/8, penutupan total kawasan", "pasti": True},
     {"tanggal": "2026-08-09", "luas_ha": 520,   "catatan": "Dilaporkan Minggu 9/8, masih dalam pendataan", "pasti": True},
+    {"tanggal": "2026-08-12", "luas_ha": 921.42, "catatan": "Dilaporkan Rabu 12/8 (data BPBD Kab. Malang); api meluas ke Pasuruan & Probolinggo, area Malang sudah padam", "pasti": True},
 ])
 AREA_DATA["tanggal"] = pd.to_datetime(AREA_DATA["tanggal"])
 
@@ -308,7 +310,7 @@ st.sidebar.info(
 )
 page = st.sidebar.radio(
     "Navigasi",
-    ["Before–After Slider", "Timeline 3 Waktu", "Peta Interaktif", "Analitik & Prediksi Sebaran"],
+    ["Before–After Slider", "Timeline 4 Waktu", "Peta Interaktif", "Analitik & Prediksi Sebaran"],
 )
 
 st.sidebar.markdown("---")
@@ -331,16 +333,21 @@ if page == "Before–After Slider":
     pair = st.selectbox(
         "Pilih pasangan pembanding",
         [
-            "2 Agustus → 9 Agustus (Awal vs Terkini)",
+            "2 Agustus → 12 Agustus (Awal vs Terkini)",
+            "9 Agustus → 12 Agustus (Update vs Terkini)",
+            "2 Agustus → 9 Agustus (Awal vs Update)",
             "2 Agustus → 7 Agustus (Awal vs Pertengahan)",
-            "7 Agustus → 9 Agustus (Pertengahan vs Terkini)",
+            "7 Agustus → 9 Agustus (Pertengahan vs Update)",
         ],
+        index=0,
     )
 
     mapping = {
-        "2 Agustus → 9 Agustus (Awal vs Terkini)": ("2026-08-02", "2026-08-09"),
+        "2 Agustus → 12 Agustus (Awal vs Terkini)": ("2026-08-02", "2026-08-12"),
+        "9 Agustus → 12 Agustus (Update vs Terkini)": ("2026-08-09", "2026-08-12"),
+        "2 Agustus → 9 Agustus (Awal vs Update)": ("2026-08-02", "2026-08-09"),
         "2 Agustus → 7 Agustus (Awal vs Pertengahan)": ("2026-08-02", "2026-08-07"),
-        "7 Agustus → 9 Agustus (Pertengahan vs Terkini)": ("2026-08-07", "2026-08-09"),
+        "7 Agustus → 9 Agustus (Pertengahan vs Update)": ("2026-08-07", "2026-08-09"),
     }
     left_key, right_key = mapping[pair]
 
@@ -364,19 +371,21 @@ if page == "Before–After Slider":
 - **2 Agustus** — kondisi vegetasi flank kaldera masih utuh, belum ada tanda kebakaran; area kawah (tengah) tampak sebagai hamparan pasir vulkanik alami — bukan hasil terbakar.
 - **7 Agustus** — mulai tampak area gelap/gosong pada flank barat daya–selatan kaldera (dekat Ngadas), serta sedikit asap tipis; area terdampak resmi ~176 ha saat ini.
 - **9 Agustus** — jejak bakar (burn scar) meluas signifikan pada sisi selatan–timur kaldera, disertai kepulan asap tebal yang terbawa angin ke arah timur/timur laut (ke arah Wonokerso–Ledokombo); area terdampak resmi ~520 ha.
+- **12 Agustus** — jejak bakar semakin meluas di flank utara–timur laut kaldera (mengarah Ngadisari–Cemoro Lawang–Wonokerto), dengan kepulan asap tebal yang tampak jelas terbawa angin; area terdampak resmi ~921 ha, api sudah bergeser ke wilayah administratif Pasuruan & Probolinggo setelah titik api di Kab. Malang dinyatakan padam.
         """
     )
 
 # ---------------------------------------------------------------------------
 # PAGE 2 — Timeline
 # ---------------------------------------------------------------------------
-elif page == "Timeline 3 Waktu":
-    st.title("Timeline Perkembangan Kebakaran — 3 Titik Waktu")
-    cols = st.columns(3)
+elif page == "Timeline 4 Waktu":
+    st.title("Timeline Perkembangan Kebakaran — 4 Titik Waktu")
+    cols = st.columns(4)
     stats = {
         "2026-08-02": "Baseline — belum ada kebakaran",
         "2026-08-07": "±176 ha terdampak (dilaporkan resmi)",
         "2026-08-09": "±520 ha terdampak (dilaporkan resmi)",
+        "2026-08-12": "±921 ha terdampak (BPBD Kab. Malang, meluas ke Pasuruan-Probolinggo)",
     }
     for col, key in zip(cols, IMAGES.keys()):
         with col:
@@ -391,7 +400,12 @@ elif page == "Timeline 3 Waktu":
         "Bantengan, Desa Sariwani, Kec. Sukapura**, lalu merembet ke **Bukit "
         "B-29**, jalur **Lingkar Kaldera Tengger (JLKT)**, hingga mengarah ke "
         "**Gunung Kursi**. Seluruh akses wisata TNBTS ditutup total sejak "
-        "**Sabtu, 8 Agustus 2026 pukul 22.00 WIB**."
+        "**Sabtu, 8 Agustus 2026 pukul 22.00 WIB**. Api terus meluas dan pada "
+        "**Rabu, 12 Agustus 2026** telah menjangkau lintas batas administratif "
+        "hingga **Kabupaten Pasuruan dan Probolinggo** (Penanjakan, Blok Pakis "
+        "Bincil/Dingklik), sementara titik api di wilayah **Kabupaten Malang "
+        "dinyatakan padam**. Penutupan kawasan wisata diperpanjang hingga "
+        "**15 Agustus 2026**."
     )
 
 # ---------------------------------------------------------------------------
@@ -408,7 +422,7 @@ elif page == "Peta Interaktif":
     which = st.radio(
         "Tampilkan overlay citra tanggal:",
         list(IMAGES.keys()),
-        index=2,
+        index=len(IMAGES) - 1,
         horizontal=True,
         format_func=lambda k: IMAGES[k]["label"],
     )
@@ -710,10 +724,10 @@ tetap dapat dipelajari model.
 
             # Citra terkini.
             folium.raster_layers.ImageOverlay(
-                image=IMAGES["2026-08-09"]["file"],
+                image=IMAGES["2026-08-12"]["file"],
                 bounds=IMG_BOUNDS,
                 opacity=0.65,
-                name="Sentinel-2 9 Agustus 2026",
+                name="Sentinel-2 12 Agustus 2026",
             ).add_to(m)
 
             # Footprint prediksi.
