@@ -50,14 +50,18 @@ IMAGES = {
     "2026-09-01": {"file": os.path.join(IMG_DIR, "sep01.jpg"), "label": "1 September 2026 (Pemulihan berlanjut)"},
     "2026-09-06": {"file": os.path.join(IMG_DIR, "sep06.jpg"), "label": "6 September 2026 (Pemulihan berlanjut)"},
     "2026-09-11": {"file": os.path.join(IMG_DIR, "sep11.jpg"), "label": "11 September 2026 (Titik api baru / kebakaran susulan)"},
+    "2026-09-16": {"file": os.path.join(IMG_DIR, "sep16.jpg"), "label": "16 September 2026 (Pasca kebakaran susulan)"},
+    "2026-09-18": {"file": os.path.join(IMG_DIR, "sep18.jpg"), "label": "18 September 2026 (Pemantauan lanjutan)"},
+    "2026-09-21": {"file": os.path.join(IMG_DIR, "sep21.jpg"), "label": "21 September 2026 (Pemantauan lanjutan)"},
+    "2026-09-26": {"file": os.path.join(IMG_DIR, "sep26.jpg"), "label": "26 September 2026 (Terbaru)"},
 }
 
 _missing = [v["file"] for v in IMAGES.values() if not os.path.isfile(v["file"])]
 if _missing:
     st.error(
         "File citra tidak ditemukan di server. Pastikan folder images/ "
-        "(berisi aug02.jpg, aug07.jpg, aug09.jpg, aug12.jpg, aug17.jpg, aug22.jpg, aug27.jpg, aug29.jpg, "
-        "sep01.jpg, sep06.jpg, sep11.jpg) sudah di-commit ke repository "
+        "(berisi " + ", ".join(os.path.basename(v["file"]) for v in IMAGES.values()) +
+        ") sudah di-commit ke repository "
         "GitHub, sejajar dengan app.py -- bukan hanya di dalam file zip.\n\n"
         "File yang hilang: " + ", ".join(_missing) +
         f"\n\nIsi folder {IMG_DIR} saat ini: "
@@ -87,6 +91,10 @@ AREA_DATA = pd.DataFrame([
     {"tanggal": "2026-09-01", "luas_ha": 1121.66, "catatan": "Kondisi padam berlanjut pada citra Sentinel-2; belum ada laporan luasan baru dari BPBD/TNBTS", "pasti": False},
     {"tanggal": "2026-09-06", "luas_ha": 1121.66, "catatan": "Kondisi padam berlanjut pada citra Sentinel-2; belum ada laporan luasan baru dari BPBD/TNBTS", "pasti": False},
     {"tanggal": "2026-09-11", "luas_ha": 1140.0, "catatan": "PERINGATAN: citra Sentinel-2 11/9 menunjukkan titik api & kepulan asap aktif di dalam kaldera (indikasi kebakaran susulan). Angka luas adalah estimasi awal sangat indikatif dari interpretasi visual (bukan rilis resmi) — rujuk BPBD/TNBTS/SiPongi+/NASA FIRMS untuk data terverifikasi", "pasti": False},
+    {"tanggal": "2026-09-16", "luas_ha": 1140.0, "catatan": "Citra Sentinel-2 16/9 (sebagian tertutup awan): garis api & asap tebal seperti 11/9 tidak lagi tampak; luas dipertahankan pada estimasi 11/9 karena belum ada rilis resmi baru dari BPBD/TNBTS", "pasti": False},
+    {"tanggal": "2026-09-18", "luas_ha": 1140.0, "catatan": "Citra Sentinel-2 18/9: tidak tampak garis api aktif; luas dipertahankan pada estimasi 11/9 (belum ada rilis resmi baru)", "pasti": False},
+    {"tanggal": "2026-09-21", "luas_ha": 1140.0, "catatan": "Citra Sentinel-2 21/9 (relatif bebas awan di area kaldera): tidak tampak garis api aktif; luas dipertahankan pada estimasi 11/9 (belum ada rilis resmi baru)", "pasti": False},
+    {"tanggal": "2026-09-26", "luas_ha": 1140.0, "catatan": "Citra Sentinel-2 26/9: tidak tampak garis api seperti 11/9, namun terlihat kepulan putih tipis di tepi timur–tenggara kaldera yang belum dapat dipastikan (asap/uap/awan) — verifikasi ke FIRMS/SiPongi+/BPBD; luas dipertahankan pada estimasi 11/9", "pasti": False},
 ])
 AREA_DATA["tanggal"] = pd.to_datetime(AREA_DATA["tanggal"])
 
@@ -113,6 +121,38 @@ south_lat, _ = px_to_latlon(ANCHOR_PX[0], IMG_H)
 _, west_lon = px_to_latlon(0, ANCHOR_PX[1])
 _, east_lon = px_to_latlon(IMG_W, ANCHOR_PX[1])
 IMG_BOUNDS = [[south_lat, west_lon], [north_lat, east_lon]]
+
+# Citra 18, 21 & 26 September diekspor dari Copernicus Browser dengan bingkai
+# lebih kecil (775x747 px) dibanding citra lain (1020x831 px). Skalanya sama
+# (~57,5 px/km) tetapi bingkainya bergeser; offset (x, y) di bawah ini
+# dihitung dengan pencocokan fitur (SIFT + RANSAC) terhadap citra 16 September:
+# piksel (x, y) citra kecil = piksel (x+122, y+43) pada bingkai 1020x831.
+# Tetap INDIKATIF (bukan rektifikasi presisi dengan GCP).
+FRAME_OFFSET = {
+    "2026-09-18": (122, 43, 775, 747),
+    "2026-09-21": (122, 43, 775, 747),
+    "2026-09-26": (122, 43, 775, 747),
+}
+COMMON_BOX = (122, 43, 122 + 775, 43 + 747)  # area irisan seluruh citra
+
+
+def bounds_for(key):
+    """Bounds overlay [[S, W], [N, E]] sesuai bingkai masing-masing citra."""
+    ox, oy, w, h = FRAME_OFFSET.get(key, (0, 0, IMG_W, IMG_H))
+    n_lat, _ = px_to_latlon(ANCHOR_PX[0], oy)
+    s_lat, _ = px_to_latlon(ANCHOR_PX[0], oy + h)
+    _, w_lon = px_to_latlon(ox, ANCHOR_PX[1])
+    _, e_lon = px_to_latlon(ox + w, ANCHOR_PX[1])
+    return [[s_lat, w_lon], [n_lat, e_lon]]
+
+
+def load_for_compare(key, other_key):
+    """Buka citra untuk slider; crop ke irisan bingkai bila pasangannya
+    berbingkai lebih kecil agar kedua citra sejajar."""
+    img = Image.open(IMAGES[key]["file"]).convert("RGB")
+    if key not in FRAME_OFFSET and other_key in FRAME_OFFSET:
+        img = img.crop(COMMON_BOX)
+    return img
 
 
 # ---------------------------------------------------------------------------
@@ -329,7 +369,7 @@ st.sidebar.info(
 )
 page = st.sidebar.radio(
     "Navigasi",
-    ["Before–After Slider", "Timeline 5 Waktu", "Peta Interaktif", "Analitik & Prediksi Sebaran"],
+    ["Before–After Slider", "Timeline Citra", "Peta Interaktif", "Analitik & Prediksi Sebaran"],
 )
 
 st.sidebar.markdown("---")
@@ -346,54 +386,56 @@ if page == "Before–After Slider":
     st.title("Perbandingan Before–After: Citra Sentinel-2")
     st.markdown(
         "Geser slider untuk membandingkan kondisi kawasan kaldera Tengger–Bromo "
-        "pada tiga titik waktu berbeda."
+        "pada berbagai titik waktu (2 Agustus – 26 September 2026)."
     )
+
+    _BLN = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli",
+            "Agustus", "September", "Oktober", "November", "Desember"]
+
+    def _dlabel(key):
+        _, m, d = key.split("-")
+        return f"{int(d)} {_BLN[int(m) - 1]}"
+
+    # (kiri, kanan, deskripsi) — urutan pertama menjadi pilihan default.
+    PAIR_DEFS = [
+        ("2026-09-21", "2026-09-26", "Konsistensi vs Kepulan tipis terbaru"),
+        ("2026-09-18", "2026-09-21", "Konsistensi pasca-flare-up"),
+        ("2026-09-16", "2026-09-18", "Konsistensi pasca-flare-up"),
+        ("2026-09-11", "2026-09-16", "Titik api aktif vs Tanpa garis api tampak"),
+        ("2026-09-11", "2026-09-26", "Titik api aktif vs Kondisi terbaru"),
+        ("2026-09-06", "2026-09-26", "Pemulihan vs Kondisi terbaru"),
+        ("2026-08-17", "2026-09-26", "Padam awal vs Kondisi terbaru"),
+        ("2026-09-06", "2026-09-11", "Padam vs Titik api baru"),
+        ("2026-08-29", "2026-09-11", "Pemulihan stabil vs Titik api baru"),
+        ("2026-09-01", "2026-09-11", "Padam vs Titik api baru"),
+        ("2026-08-17", "2026-09-11", "Padam awal vs Titik api baru"),
+        ("2026-08-02", "2026-09-11", "Awal vs Titik api baru"),
+        ("2026-08-22", "2026-08-29", "Pemulihan awal vs Pemulihan stabil"),
+        ("2026-08-17", "2026-08-29", "Padam vs Pemulihan stabil"),
+        ("2026-08-27", "2026-08-29", "Konsistensi pemulihan"),
+        ("2026-08-17", "2026-08-22", "Padam vs Pemulihan"),
+        ("2026-08-02", "2026-08-17", "Awal vs Padam"),
+        ("2026-08-12", "2026-08-17", "Meluas vs Padam"),
+        ("2026-08-02", "2026-08-12", "Awal vs Meluas"),
+        ("2026-08-09", "2026-08-12", "Update vs Meluas"),
+        ("2026-08-02", "2026-08-09", "Awal vs Update"),
+        ("2026-08-02", "2026-08-07", "Awal vs Pertengahan"),
+        ("2026-08-07", "2026-08-09", "Pertengahan vs Update"),
+    ]
+    mapping = {
+        f"{_dlabel(a)} → {_dlabel(b)} ({desc})": (a, b)
+        for a, b, desc in PAIR_DEFS
+    }
 
     pair = st.selectbox(
         "Pilih pasangan pembanding",
-        [
-            "6 September → 11 September (Padam vs Titik api baru)",
-            "29 Agustus → 11 September (Pemulihan stabil vs Titik api baru)",
-            "1 September → 11 September (Padam vs Titik api baru)",
-            "17 Agustus → 11 September (Padam awal vs Titik api baru)",
-            "2 Agustus → 11 September (Awal vs Titik api baru)",
-            "22 Agustus → 29 Agustus (Pemulihan awal vs Pemulihan stabil)",
-            "17 Agustus → 29 Agustus (Padam vs Pemulihan stabil)",
-            "27 Agustus → 29 Agustus (Konsistensi pemulihan)",
-            "17 Agustus → 22 Agustus (Padam vs Pemulihan)",
-            "2 Agustus → 17 Agustus (Awal vs Padam)",
-            "12 Agustus → 17 Agustus (Meluas vs Padam)",
-            "2 Agustus → 12 Agustus (Awal vs Meluas)",
-            "9 Agustus → 12 Agustus (Update vs Meluas)",
-            "2 Agustus → 9 Agustus (Awal vs Update)",
-            "2 Agustus → 7 Agustus (Awal vs Pertengahan)",
-            "7 Agustus → 9 Agustus (Pertengahan vs Update)",
-        ],
+        list(mapping.keys()),
         index=0,
     )
-
-    mapping = {
-        "6 September → 11 September (Padam vs Titik api baru)": ("2026-09-06", "2026-09-11"),
-        "29 Agustus → 11 September (Pemulihan stabil vs Titik api baru)": ("2026-08-29", "2026-09-11"),
-        "1 September → 11 September (Padam vs Titik api baru)": ("2026-09-01", "2026-09-11"),
-        "17 Agustus → 11 September (Padam awal vs Titik api baru)": ("2026-08-17", "2026-09-11"),
-        "2 Agustus → 11 September (Awal vs Titik api baru)": ("2026-08-02", "2026-09-11"),
-        "22 Agustus → 29 Agustus (Pemulihan awal vs Pemulihan stabil)": ("2026-08-22", "2026-08-29"),
-        "17 Agustus → 29 Agustus (Padam vs Pemulihan stabil)": ("2026-08-17", "2026-08-29"),
-        "27 Agustus → 29 Agustus (Konsistensi pemulihan)": ("2026-08-27", "2026-08-29"),
-        "17 Agustus → 22 Agustus (Padam vs Pemulihan)": ("2026-08-17", "2026-08-22"),
-        "2 Agustus → 17 Agustus (Awal vs Padam)": ("2026-08-02", "2026-08-17"),
-        "12 Agustus → 17 Agustus (Meluas vs Padam)": ("2026-08-12", "2026-08-17"),
-        "2 Agustus → 12 Agustus (Awal vs Meluas)": ("2026-08-02", "2026-08-12"),
-        "9 Agustus → 12 Agustus (Update vs Meluas)": ("2026-08-09", "2026-08-12"),
-        "2 Agustus → 9 Agustus (Awal vs Update)": ("2026-08-02", "2026-08-09"),
-        "2 Agustus → 7 Agustus (Awal vs Pertengahan)": ("2026-08-02", "2026-08-07"),
-        "7 Agustus → 9 Agustus (Pertengahan vs Update)": ("2026-08-07", "2026-08-09"),
-    }
     left_key, right_key = mapping[pair]
 
-    img1_pil = Image.open(IMAGES[left_key]["file"]).convert("RGB")
-    img2_pil = Image.open(IMAGES[right_key]["file"]).convert("RGB")
+    img1_pil = load_for_compare(left_key, right_key)
+    img2_pil = load_for_compare(right_key, left_key)
 
     image_comparison(
         img1=img1_pil,
@@ -420,13 +462,19 @@ if page == "Before–After Slider":
 - **1 September** — citra tetap tidak menunjukkan asap maupun titik panas aktif; semburat hijau muda regenerasi vegetasi pada flank kaldera terlihat sedikit lebih merata dibanding akhir Agustus.
 - **6 September** — pola pemulihan vegetasi berlanjut secara konsisten; tidak ada tanda kebakaran baru maupun anomali visual dibanding citra 1 September.
 - **11 September** — citra Sentinel-2 menunjukkan **titik api aktif dan kepulan asap tebal kembali muncul di dalam kaldera**, berbeda dari kondisi padam yang konsisten pada citra 22 Agustus–6 September. Ini adalah indikasi **kebakaran susulan (flare-up)**, bukan kelanjutan tren pemulihan vegetasi. Perlu verifikasi lanjut ke BPBD/TNBTS/SiPongi+/NASA FIRMS untuk status dan luasan resmi terkini.
+- **16 September** — bingkai citra sama dengan 11 September. Sebagian area tertutup awan (barat laut dan flank tenggara), namun garis api oranye dan kepulan asap tebal yang tampak pada 11 September **tidak lagi terlihat**. Jejak bakar gelap pada flank selatan–barat daya kaldera tampak jelas; hanya tersisa kepulan tipis di sekitar kawah.
+- **18 September** — kaldera terlihat jelas (awan terutama di sisi timur). Tidak tampak garis api maupun asap tebal; kepulan putih di kawah Bromo tampak seperti uap kawah. Burn scar relatif stabil dibanding 16 September.
+- **21 September** — citra paling bersih dari awan di area kaldera; tidak tampak garis api maupun asap. Pola burn scar konsisten dengan 18 September.
+- **26 September** — sebagian besar bebas awan. Tidak ada garis api seperti pada 11 September, namun tampak **kepulan putih tipis di tepi timur kaldera** dan bercak gelap kecil dengan kepulan di tepi tenggara. Belum dapat dipastikan apakah itu asap, uap, atau awan tipis — **perlu verifikasi** ke NASA FIRMS/VIIRS, SiPongi+ (KLHK), dan BPBD/TNBTS sebelum ditafsirkan sebagai titik api baru.
+
+*Catatan: pengamatan di atas adalah interpretasi visual citra true color, bukan deteksi otomatis. Citra 18, 21, dan 26 September memiliki bingkai lebih kecil; pada slider, citra pasangannya dipotong otomatis ke bingkai yang sama agar sejajar.*
         """
     )
 
 # ---------------------------------------------------------------------------
 # PAGE 2 — Timeline
 # ---------------------------------------------------------------------------
-elif page == "Timeline 5 Waktu":
+elif page == "Timeline Citra":
     st.title(f"Timeline Perkembangan Kebakaran — {len(IMAGES)} Titik Waktu")
     stats = {
         "2026-08-02": "Baseline — belum ada kebakaran",
@@ -440,6 +488,10 @@ elif page == "Timeline 5 Waktu":
         "2026-09-01": "Pemulihan berlanjut — tanpa asap/hotspot baru",
         "2026-09-06": "Pemulihan berlanjut — kondisi konsisten dengan awal September",
         "2026-09-11": "⚠️ Titik api baru & asap aktif terpantau kembali di kaldera (kebakaran susulan)",
+        "2026-09-16": "Garis api & asap tebal 11/9 tidak lagi tampak (sebagian tertutup awan); burn scar jelas",
+        "2026-09-18": "Tanpa garis api/asap tebal; kepulan putih di kawah tampak seperti uap kawah",
+        "2026-09-21": "Citra relatif bebas awan; tanpa garis api/asap; kondisi konsisten",
+        "2026-09-26": "Tanpa garis api; kepulan putih tipis di tepi timur–tenggara kaldera perlu diverifikasi (FIRMS/SiPongi+)",
     }
     keys = list(IMAGES.keys())
     n_cols = 4
@@ -478,7 +530,13 @@ elif page == "Timeline 5 Waktu":
         "asap aktif kembali muncul di dalam kaldera** — indikasi kebakaran susulan "
         "yang belum tercermin dalam laporan resmi BPBD/TNBTS. Status ini perlu "
         "diverifikasi lebih lanjut melalui BNPB, SiPongi+ (KLHK), dan hotspot NASA "
-        "FIRMS/VIIRS."
+        "FIRMS/VIIRS. Pada update citra **Rabu, 16 September**, **Jumat, 18 "
+        "September**, dan **Senin, 21 September 2026**, garis api dan kepulan asap "
+        "tebal seperti pada 11 September tidak lagi tampak, dengan burn scar yang "
+        "relatif stabil. Citra terbaru **Sabtu, 26 September 2026** juga tidak "
+        "menunjukkan garis api, tetapi memperlihatkan kepulan putih tipis di tepi "
+        "timur–tenggara kaldera yang belum dapat dipastikan sebagai asap, uap, atau "
+        "awan tipis, sehingga perlu diverifikasi ke sumber resmi."
     )
 
 # ---------------------------------------------------------------------------
@@ -492,11 +550,10 @@ elif page == "Peta Interaktif":
         "Gunakan hanya untuk konteks spasial umum, bukan pengukuran presisi."
     )
 
-    which = st.radio(
+    which = st.selectbox(
         "Tampilkan overlay citra tanggal:",
         list(IMAGES.keys()),
         index=len(IMAGES) - 1,
-        horizontal=True,
         format_func=lambda k: IMAGES[k]["label"],
     )
 
@@ -507,7 +564,7 @@ elif page == "Peta Interaktif":
     )
     folium.raster_layers.ImageOverlay(
         image=IMAGES[which]["file"],
-        bounds=IMG_BOUNDS,
+        bounds=bounds_for(which),
         opacity=0.9,
         name=IMAGES[which]["label"],
     ).add_to(m)
@@ -555,16 +612,23 @@ else:
     st.title("Analitik GIS & Machine Learning — Prediksi Sebaran Kebakaran")
 
     st.error(
-        "🔥 Update 11 September 2026: setelah periode padam stabil sejak 17 Agustus "
-        "hingga 6 September 2026, citra Sentinel-2 terbaru **11 September 2026** "
-        "(ditampilkan sebagai overlay peta di bawah) menunjukkan **titik api dan "
-        "kepulan asap aktif kembali** di dalam kawasan kaldera — indikasi kebakaran "
-        "susulan. Angka luasan pada tabel di bawah untuk tanggal ini adalah "
-        "**estimasi awal yang sangat indikatif** dari interpretasi visual citra, "
-        "BUKAN rilis resmi. Rujuk BNPB, BPBD, SiPongi+ (KLHK), dan hotspot NASA "
-        "FIRMS/VIIRS untuk konfirmasi dan data operasional terkini. Modul prediksi "
-        "di bawah tetap dibangun dari data historis episode 3–17 Agustus 2026 "
-        "sehingga proyeksinya belum mencerminkan dinamika titik api baru ini."
+        "🔥 Kilas balik 11 September 2026: setelah periode padam stabil sejak 17 "
+        "Agustus hingga 6 September 2026, citra Sentinel-2 **11 September 2026** "
+        "menunjukkan **titik api dan kepulan asap aktif kembali** di dalam kaldera "
+        "(kebakaran susulan). Angka luasan untuk tanggal ini adalah **estimasi awal "
+        "yang sangat indikatif** dari interpretasi visual citra, BUKAN rilis resmi."
+    )
+    st.info(
+        "🛰️ Update 16–26 September 2026: citra Sentinel-2 16, 18, 21, dan 26 "
+        "September (overlay terbaru = 26 September pada peta di bawah) tidak lagi "
+        "menampilkan garis api dan asap tebal seperti 11 September. Namun citra "
+        "26 September memperlihatkan kepulan putih tipis di tepi timur–tenggara "
+        "kaldera yang belum dapat dipastikan sebagai asap, uap, atau awan. Luasan "
+        "16–26 September dipertahankan pada estimasi 11 September karena belum ada "
+        "rilis resmi baru. Rujuk BNPB, BPBD, SiPongi+ (KLHK), dan hotspot NASA "
+        "FIRMS/VIIRS untuk konfirmasi. Modul prediksi di bawah tetap dibangun dari "
+        "data historis episode 3–17 Agustus 2026 sehingga proyeksinya belum "
+        "mencerminkan dinamika kebakaran susulan."
     )
     st.warning(
         "Prediksi ML bersifat riset/indikatif. Model membutuhkan data historis "
@@ -583,12 +647,14 @@ else:
     )
     st.caption(
         "Baris hingga **17 Agustus 2026** berasal dari rilis resmi BPBD/TNBTS/Satgas "
-        "Karhutla. Baris **22 Agustus – 11 September 2026** BUKAN rilis resmi — "
+        "Karhutla. Baris **22 Agustus – 26 September 2026** BUKAN rilis resmi — "
         "merupakan interpretasi visual citra Sentinel-2 pada aplikasi ini untuk "
         "menjaga kesinambungan data hingga observasi terbaru. Baris **11 September "
         "2026** perlu perhatian khusus: citra menunjukkan titik api & asap aktif "
         "kembali di kaldera setelah periode padam sejak 17 Agustus — rujuk BPBD/"
-        "TNBTS/SiPongi+ (KLHK)/NASA FIRMS untuk konfirmasi dan angka resmi."
+        "TNBTS/SiPongi+ (KLHK)/NASA FIRMS untuk konfirmasi dan angka resmi. Baris "
+        "**16–26 September 2026** mempertahankan estimasi 11 September karena tidak "
+        "tampak garis api aktif pada citra dan belum ada rilis resmi baru."
     )
 
     # Trend chart lama tetap dipertahankan.
@@ -820,7 +886,7 @@ tetap dapat dipelajari model.
             latest_key = list(IMAGES.keys())[-1]
             folium.raster_layers.ImageOverlay(
                 image=IMAGES[latest_key]["file"],
-                bounds=IMG_BOUNDS,
+                bounds=bounds_for(latest_key),
                 opacity=0.65,
                 name=f"Sentinel-2 {IMAGES[latest_key]['label']}",
             ).add_to(m)
